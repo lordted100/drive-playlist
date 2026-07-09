@@ -7,9 +7,9 @@ let videos = JSON.parse(localStorage.getItem("videos") || "[]");
 let current = Number(localStorage.getItem("current") || 0);
 let shuffle = localStorage.getItem("shuffle") === "true";
 let repeat = localStorage.getItem("repeat") === "true";
+let serviceWorkerReady = false;
 
 const player = document.getElementById("player");
-const drivePreview = document.getElementById("drivePreview");
 const nowPlaying = document.getElementById("nowPlaying");
 const statusBox = document.getElementById("status");
 const playlistBox = document.getElementById("playlist");
@@ -24,16 +24,21 @@ const repeatBtn = document.getElementById("repeatBtn");
 
 folderInput.value = localStorage.getItem("folderLink") || "";
 
-window.onload = () => {
+window.onload = async () => {
+  await setupServiceWorker();
+
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPE,
-    callback: (response) => {
+    callback: async (response) => {
       if (response.error) {
         statusBox.textContent = "Google sign-in failed.";
         return;
       }
+
       accessToken = response.access_token;
+      await sendTokenToServiceWorker();
+
       statusBox.textContent = "Connected. Now load your folder.";
       connectBtn.textContent = "Reconnect to Google Drive";
     }
@@ -42,6 +47,42 @@ window.onload = () => {
   render();
   updateButtons();
 };
+
+async function setupServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    statusBox.textContent = "This browser does not support service workers.";
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js");
+    await navigator.serviceWorker.ready;
+
+    if (!navigator.serviceWorker.controller) {
+      statusBox.textContent = "First-time setup complete. Refresh this page once, then connect again.";
+      return;
+    }
+
+    serviceWorkerReady = true;
+  } catch (err) {
+    console.error(err);
+    statusBox.textContent = "Could not start the video helper. Try refreshing.";
+  }
+}
+
+async function sendTokenToServiceWorker() {
+  if (!navigator.serviceWorker.controller) {
+    statusBox.textContent = "Refresh this page once, then connect again.";
+    return;
+  }
+
+  navigator.serviceWorker.controller.postMessage({
+    type: "SET_ACCESS_TOKEN",
+    token: accessToken
+  });
+
+  serviceWorkerReady = true;
+}
 
 connectBtn.onclick = () => {
   tokenClient.requestAccessToken({ prompt: "consent" });
@@ -76,7 +117,11 @@ player.addEventListener("ended", () => {
 player.addEventListener("timeupdate", () => {
   if (!videos[current]) return;
   localStorage.setItem("lastVideoId", videos[current].id);
-  localStorage.setItem("lastTime", player.currentTime);
+  localStorage.setItem("lastTime", String(player.currentTime || 0));
+});
+
+player.addEventListener("error", () => {
+  statusBox.textContent = "Video failed to load. Reconnect to Google Drive, then tap the video again.";
 });
 
 function updateButtons() {
@@ -114,7 +159,7 @@ async function loadFolder() {
 
     do {
       const query = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType contains 'video/'`);
-      const fields = encodeURIComponent("nextPageToken,files(id,name,mimeType,size,modifiedTime,webContentLink,webViewLink)");
+      const fields = encodeURIComponent("nextPageToken,files(id,name,mimeType,size,modifiedTime)");
       let url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=name&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
       if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
 
@@ -134,16 +179,15 @@ async function loadFolder() {
     videos = allFiles.map(file => ({
       id: file.id,
       name: file.name,
-      // For Android/browser playback, the video element needs a normal public URL.
-      // Make the files or folder "Anyone with the link can view" in Google Drive.
-      url: file.webContentLink || `https://drive.google.com/uc?export=download&id=${file.id}`,
-      viewUrl: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`
+      size: file.size || "",
+      mimeType: file.mimeType || ""
     }));
 
     localStorage.setItem("videos", JSON.stringify(videos));
 
     if (!videos.length) {
       current = 0;
+      localStorage.setItem("current", "0");
       statusBox.textContent = "No videos found. Check that the folder contains MP4/video files.";
       render();
       return;
@@ -153,7 +197,7 @@ async function loadFolder() {
     const lastIndex = videos.findIndex(video => video.id === lastVideoId);
     current = lastIndex >= 0 ? lastIndex : 0;
 
-    statusBox.textContent = `${videos.length} videos loaded. Tap a video, then tap play if Android blocks autoplay.`;
+    statusBox.textContent = `${videos.length} videos loaded.`;
     playCurrent(true);
   } catch (error) {
     console.error(error);
@@ -165,79 +209,43 @@ async function loadFolder() {
 function playCurrent(restoreTime = false) {
   if (!videos.length || !videos[current]) return;
 
+  if (!serviceWorkerReady || !navigator.serviceWorker.controller) {
+    statusBox.textContent = "Refresh this page once, reconnect, then tap the video.";
+    return;
+  }
+
   const video = videos[current];
 
-  // Reset both players
   player.pause();
   player.removeAttribute("src");
-  player.classList.remove("hidden");
   player.load();
 
-  drivePreview.src = "";
-  drivePreview.classList.add("hidden");
-
-  // Try several public Drive URL formats. Google is awkward with video tags,
-  // especially on Android, so if these fail we fall back to the official Drive preview player.
-  const directUrls = [
-    `https://drive.google.com/uc?export=download&id=${video.id}`,
-    `https://drive.usercontent.google.com/download?id=${video.id}&export=download&authuser=0`,
-    video.url
-  ].filter(Boolean);
-
-  let attempt = 0;
-
   nowPlaying.textContent = video.name;
-  statusBox.textContent = "Loading video...";
-  localStorage.setItem("current", current);
+  localStorage.setItem("current", String(current));
 
-  function tryUrl() {
-    if (attempt >= directUrls.length) {
-      usePreviewFallback();
-      return;
-    }
+  player.src = `./drive-media/${encodeURIComponent(video.id)}`;
+  player.load();
 
-    player.src = directUrls[attempt++];
-    player.preload = "metadata";
-    player.load();
-
-    player.onloadedmetadata = () => {
-      if (restoreTime && localStorage.getItem("lastVideoId") === video.id) {
-        const lastTime = Number(localStorage.getItem("lastTime") || 0);
-        if (lastTime > 5 && lastTime < player.duration - 5) {
-          player.currentTime = lastTime;
-        }
+  player.onloadedmetadata = () => {
+    if (restoreTime && localStorage.getItem("lastVideoId") === video.id) {
+      const lastTime = Number(localStorage.getItem("lastTime") || 0);
+      if (lastTime > 5 && player.duration && lastTime < player.duration - 5) {
+        player.currentTime = lastTime;
       }
-    };
+    }
+  };
 
-    player.onerror = () => {
-      tryUrl();
-    };
+  player.play()
+    .then(() => {
+      statusBox.textContent = "Playing.";
+    })
+    .catch(() => {
+      statusBox.textContent = "Tap play on the video player. Android often blocks autoplay.";
+    });
 
-    player.play()
-      .then(() => {
-        statusBox.textContent = "Playing.";
-      })
-      .catch(() => {
-        statusBox.textContent = "Tap play on the video player. Android often blocks autoplay.";
-      });
-  }
-
-  function usePreviewFallback() {
-    player.classList.add("hidden");
-    player.pause();
-    player.removeAttribute("src");
-    player.load();
-
-    drivePreview.classList.remove("hidden");
-    drivePreview.src = `https://drive.google.com/file/d/${video.id}/preview`;
-
-    statusBox.textContent =
-      "Using Google Drive preview mode. If it starts muted/paused, tap the preview player once.";
-  }
-
-  tryUrl();
   render();
 }
+
 function nextVideo() {
   if (!videos.length) return;
 
@@ -251,14 +259,14 @@ function nextVideo() {
     current = (current + 1) % videos.length;
   }
 
-  localStorage.setItem("lastTime", 0);
+  localStorage.setItem("lastTime", "0");
   playCurrent(false);
 }
 
 function previousVideo() {
   if (!videos.length) return;
   current = (current - 1 + videos.length) % videos.length;
-  localStorage.setItem("lastTime", 0);
+  localStorage.setItem("lastTime", "0");
   playCurrent(false);
 }
 
@@ -277,7 +285,7 @@ function render() {
     row.innerHTML = `<strong>${escapeHtml(video.name)}</strong><br><small>${index + 1} of ${videos.length}</small>`;
     row.onclick = () => {
       current = index;
-      localStorage.setItem("lastTime", 0);
+      localStorage.setItem("lastTime", "0");
       playCurrent(false);
     };
     playlistBox.appendChild(row);

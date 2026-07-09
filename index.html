@@ -11,12 +11,11 @@
   <main class="app">
     <header>
       <h1>Drive Playlist</h1>
-      <p>Stream a Google Drive folder as a video playlist.</p>
+      <p>Stream a Google Drive folder as a proper video playlist.</p>
     </header>
 
     <section class="player-card">
-      <video id="player" controls playsinline></video>
-<iframe id="drivePreview" class="hidden" allow="autoplay; fullscreen" allowfullscreen></iframe>
+      <video id="player" controls playsinline preload="metadata"></video>
       <h2 id="nowPlaying">Nothing loaded yet</h2>
       <p id="status">Connect to Google Drive, then paste your folder link.</p>
 
