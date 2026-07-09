@@ -113,7 +113,7 @@ async function loadFolder() {
 
     do {
       const query = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType contains 'video/'`);
-      const fields = encodeURIComponent("nextPageToken,files(id,name,mimeType,size,modifiedTime)");
+      const fields = encodeURIComponent("nextPageToken,files(id,name,mimeType,size,modifiedTime,webContentLink,webViewLink)");
       let url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=name&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
       if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
 
@@ -133,7 +133,10 @@ async function loadFolder() {
     videos = allFiles.map(file => ({
       id: file.id,
       name: file.name,
-      url: `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&access_token=${encodeURIComponent(accessToken)}`
+      // For Android/browser playback, the video element needs a normal public URL.
+      // Make the files or folder "Anyone with the link can view" in Google Drive.
+      url: file.webContentLink || `https://drive.google.com/uc?export=download&id=${file.id}`,
+      viewUrl: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`
     }));
 
     localStorage.setItem("videos", JSON.stringify(videos));
@@ -149,7 +152,7 @@ async function loadFolder() {
     const lastIndex = videos.findIndex(video => video.id === lastVideoId);
     current = lastIndex >= 0 ? lastIndex : 0;
 
-    statusBox.textContent = `${videos.length} videos loaded.`;
+    statusBox.textContent = `${videos.length} videos loaded. Tap a video, then tap play if Android blocks autoplay.`;
     playCurrent(true);
   } catch (error) {
     console.error(error);
@@ -161,21 +164,38 @@ async function loadFolder() {
 function playCurrent(restoreTime = false) {
   if (!videos.length || !videos[current]) return;
 
-  player.src = videos[current].url;
-  nowPlaying.textContent = videos[current].name;
+  const video = videos[current];
+
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+
+  player.src = video.url;
+  player.preload = "metadata";
+  nowPlaying.textContent = video.name;
+  statusBox.textContent = "Loading video... If it does not start, tap play once.";
   localStorage.setItem("current", current);
 
   player.onloadedmetadata = () => {
-    if (restoreTime && localStorage.getItem("lastVideoId") === videos[current].id) {
+    if (restoreTime && localStorage.getItem("lastVideoId") === video.id) {
       const lastTime = Number(localStorage.getItem("lastTime") || 0);
       if (lastTime > 5 && lastTime < player.duration - 5) {
         player.currentTime = lastTime;
       }
     }
-    player.play().catch(() => {
-      statusBox.textContent = "Tap play if Android blocks autoplay.";
-    });
   };
+
+  player.onerror = () => {
+    statusBox.textContent = "This video link would not play. Make sure the file is shared as Anyone with the link can view.";
+  };
+
+  player.play()
+    .then(() => {
+      statusBox.textContent = "Playing.";
+    })
+    .catch(() => {
+      statusBox.textContent = "Tap play on the video player. Android often blocks autoplay.";
+    });
 
   render();
 }
