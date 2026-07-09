@@ -1,2 +1,2 @@
-# drive-playlist
-Streams videos from my Google Drive.
+Drive Playlist preview-fallback build.
+Upload/replace index.html, style.css and script.js in GitHub.

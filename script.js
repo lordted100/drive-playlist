@@ -9,6 +9,7 @@ let shuffle = localStorage.getItem("shuffle") === "true";
 let repeat = localStorage.getItem("repeat") === "true";
 
 const player = document.getElementById("player");
+const drivePreview = document.getElementById("drivePreview");
 const nowPlaying = document.getElementById("nowPlaying");
 const statusBox = document.getElementById("status");
 const playlistBox = document.getElementById("playlist");
@@ -166,40 +167,77 @@ function playCurrent(restoreTime = false) {
 
   const video = videos[current];
 
+  // Reset both players
   player.pause();
   player.removeAttribute("src");
+  player.classList.remove("hidden");
   player.load();
 
-  player.src = video.url;
-  player.preload = "metadata";
+  drivePreview.src = "";
+  drivePreview.classList.add("hidden");
+
+  // Try several public Drive URL formats. Google is awkward with video tags,
+  // especially on Android, so if these fail we fall back to the official Drive preview player.
+  const directUrls = [
+    `https://drive.google.com/uc?export=download&id=${video.id}`,
+    `https://drive.usercontent.google.com/download?id=${video.id}&export=download&authuser=0`,
+    video.url
+  ].filter(Boolean);
+
+  let attempt = 0;
+
   nowPlaying.textContent = video.name;
-  statusBox.textContent = "Loading video... If it does not start, tap play once.";
+  statusBox.textContent = "Loading video...";
   localStorage.setItem("current", current);
 
-  player.onloadedmetadata = () => {
-    if (restoreTime && localStorage.getItem("lastVideoId") === video.id) {
-      const lastTime = Number(localStorage.getItem("lastTime") || 0);
-      if (lastTime > 5 && lastTime < player.duration - 5) {
-        player.currentTime = lastTime;
-      }
+  function tryUrl() {
+    if (attempt >= directUrls.length) {
+      usePreviewFallback();
+      return;
     }
-  };
 
-  player.onerror = () => {
-    statusBox.textContent = "This video link would not play. Make sure the file is shared as Anyone with the link can view.";
-  };
+    player.src = directUrls[attempt++];
+    player.preload = "metadata";
+    player.load();
 
-  player.play()
-    .then(() => {
-      statusBox.textContent = "Playing.";
-    })
-    .catch(() => {
-      statusBox.textContent = "Tap play on the video player. Android often blocks autoplay.";
-    });
+    player.onloadedmetadata = () => {
+      if (restoreTime && localStorage.getItem("lastVideoId") === video.id) {
+        const lastTime = Number(localStorage.getItem("lastTime") || 0);
+        if (lastTime > 5 && lastTime < player.duration - 5) {
+          player.currentTime = lastTime;
+        }
+      }
+    };
 
+    player.onerror = () => {
+      tryUrl();
+    };
+
+    player.play()
+      .then(() => {
+        statusBox.textContent = "Playing.";
+      })
+      .catch(() => {
+        statusBox.textContent = "Tap play on the video player. Android often blocks autoplay.";
+      });
+  }
+
+  function usePreviewFallback() {
+    player.classList.add("hidden");
+    player.pause();
+    player.removeAttribute("src");
+    player.load();
+
+    drivePreview.classList.remove("hidden");
+    drivePreview.src = `https://drive.google.com/file/d/${video.id}/preview`;
+
+    statusBox.textContent =
+      "Using Google Drive preview mode. If it starts muted/paused, tap the preview player once.";
+  }
+
+  tryUrl();
   render();
 }
-
 function nextVideo() {
   if (!videos.length) return;
 
