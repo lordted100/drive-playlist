@@ -11,35 +11,36 @@
   <main class="app">
     <header>
       <h1>Drive Playlist</h1>
-      <p>Stream a Google Drive folder as a proper video playlist.</p>
+      <p>Google Drive folder playlist with smooth preloading.</p>
     </header>
 
-    <section class="player-card">
+    <section class="card">
       <video id="player" controls playsinline preload="metadata"></video>
-      <h2 id="nowPlaying">Nothing loaded yet</h2>
-      <p id="status">Connect to Google Drive, then paste your folder link.</p>
 
-      <div class="controls">
+      <h2 id="nowPlaying">Nothing loaded yet</h2>
+      <p id="status">Connect to Google Drive, then load your folder.</p>
+      <p id="bufferStatus"></p>
+
+      <div class="grid">
         <button id="prevBtn">⏮ Previous</button>
         <button id="nextBtn">Next ⏭</button>
       </div>
 
-      <div class="controls">
+      <div class="grid">
         <button id="shuffleBtn">Shuffle: Off</button>
         <button id="repeatBtn">Repeat: Off</button>
       </div>
     </section>
 
-    <section class="setup-card">
+    <section class="card">
       <button id="connectBtn" class="primary">Connect to Google Drive</button>
       <input id="folderInput" placeholder="Paste Google Drive folder link here" />
       <button id="loadBtn" class="primary">Load Folder Playlist</button>
-      <button id="refreshBtn">Refresh Playlist</button>
     </section>
 
-    <section>
+    <section class="card">
       <h2>Playlist</h2>
-      <div id="playlist" class="playlist"></div>
+      <div id="playlist"></div>
     </section>
   </main>
 

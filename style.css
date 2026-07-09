@@ -4,43 +4,43 @@
 
 body {
   margin: 0;
-  background: #0f0f12;
-  color: #f2f2f2;
+  background: #101014;
+  color: #f4f4f6;
   font-family: Arial, sans-serif;
 }
 
 .app {
   max-width: 900px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 14px;
 }
 
 header {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
-h1 {
-  margin: 0 0 6px;
+h1, h2 {
+  margin: 0 0 8px;
 }
 
 p {
-  color: #b8b8c2;
+  color: #b8b8c5;
+  line-height: 1.4;
 }
 
-.player-card,
-.setup-card {
+.card {
   background: #181820;
-  border: 1px solid #2c2c38;
+  border: 1px solid #2d2d3a;
   border-radius: 14px;
   padding: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 video {
   width: 100%;
   max-height: 58vh;
-  background: #000;
-  border-radius: 10px;
+  background: black;
+  border-radius: 12px;
 }
 
 button,
@@ -50,16 +50,12 @@ input {
   margin-top: 10px;
   font-size: 16px;
   border-radius: 10px;
-  border: 1px solid #3b3b4a;
+  border: 1px solid #3a3a4a;
 }
 
 button {
-  background: #262635;
+  background: #292938;
   color: white;
-}
-
-button:active {
-  transform: scale(0.99);
 }
 
 .primary {
@@ -67,7 +63,7 @@ button:active {
   border-color: #315cff;
 }
 
-.controls {
+.grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
@@ -75,15 +71,29 @@ button:active {
 
 .track {
   padding: 12px;
-  border-bottom: 1px solid #2c2c38;
+  border-bottom: 1px solid #2d2d3a;
   cursor: pointer;
 }
 
-.track small {
-  color: #aaa;
+.track.active {
+  background: #315cff;
+  border-radius: 10px;
 }
 
-.track.active {
-  background: #254eea;
-  border-radius: 10px;
+.track small {
+  color: #bbbbc5;
+}
+
+.progress {
+  margin-top: 6px;
+  height: 6px;
+  background: #303040;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.bar {
+  height: 100%;
+  width: 0%;
+  background: white;
 }
