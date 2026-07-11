@@ -7,7 +7,14 @@ const TOKEN_EXPIRY_KEY = "driveAccessTokenExpiry";
 let tokenClient;
 let accessToken = "";
 
-let videos = JSON.parse(localStorage.getItem("videos") || "[]");
+let videos = [];
+try {
+  videos = JSON.parse(localStorage.getItem("videos") || "[]");
+  if (!Array.isArray(videos)) videos = [];
+} catch {
+  videos = [];
+  localStorage.removeItem("videos");
+}
 let current = Number(localStorage.getItem("current") || 0);
 let shuffle = localStorage.getItem("shuffle") === "true";
 let repeat = localStorage.getItem("repeat") === "true";
@@ -29,7 +36,40 @@ const repeatBtn = document.getElementById("repeatBtn");
 
 folderInput.value = localStorage.getItem("folderLink") || "";
 
-window.onload = () => {
+document.addEventListener("DOMContentLoaded", () => {
+  connectBtn.onclick = connectGoogleDrive;
+  loadBtn.onclick = loadFolder;
+  prevBtn.onclick = previousVideo;
+  nextBtn.onclick = nextVideo;
+
+  shuffleBtn.onclick = () => {
+    shuffle = !shuffle;
+    localStorage.setItem("shuffle", String(shuffle));
+    updateButtons();
+  };
+
+  repeatBtn.onclick = () => {
+    repeat = !repeat;
+    localStorage.setItem("repeat", String(repeat));
+    updateButtons();
+  };
+
+  updateButtons();
+  render();
+  initialiseGoogleSignIn();
+});
+
+async function initialiseGoogleSignIn() {
+  statusBox.textContent = "Starting Google Drive connection...";
+
+  const googleReady = await waitForGoogleIdentity();
+
+  if (!googleReady) {
+    statusBox.textContent =
+      "Google sign-in failed to load. Refresh the page or disable content blocking for this site.";
+    return;
+  }
+
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPE,
@@ -48,12 +88,10 @@ window.onload = () => {
       }
     },
     error_callback: () => {
-      statusBox.textContent = "Automatic reconnect was blocked. Tap Connect once.";
+      statusBox.textContent =
+        "Automatic reconnect was blocked. Tap Connect to Google Drive once.";
     }
   });
-
-  updateButtons();
-  render();
 
   if (restoreAccessToken()) {
     connectBtn.textContent = "Google Drive connected";
@@ -65,7 +103,44 @@ window.onload = () => {
   } else {
     trySilentReconnect();
   }
-};
+}
+
+function waitForGoogleIdentity(timeoutMs = 10000) {
+  return new Promise(resolve => {
+    const started = Date.now();
+
+    const check = () => {
+      if (
+        window.google &&
+        google.accounts &&
+        google.accounts.oauth2 &&
+        google.accounts.oauth2.initTokenClient
+      ) {
+        resolve(true);
+        return;
+      }
+
+      if (Date.now() - started >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+
+      setTimeout(check, 100);
+    };
+
+    check();
+  });
+}
+
+function connectGoogleDrive() {
+  if (!tokenClient) {
+    statusBox.textContent =
+      "Google sign-in is still loading. Wait a moment, then press Connect again.";
+    return;
+  }
+
+  tokenClient.requestAccessToken({ prompt: "" });
+}
 
 function saveAccessToken(response) {
   accessToken = response.access_token;
@@ -102,6 +177,10 @@ function trySilentReconnect() {
 
   setTimeout(() => {
     try {
+      if (!tokenClient) {
+        statusBox.textContent = "Tap Connect to Google Drive.";
+        return;
+      }
       tokenClient.requestAccessToken({ prompt: "" });
     } catch (error) {
       console.error(error);
@@ -109,26 +188,6 @@ function trySilentReconnect() {
     }
   }, 500);
 }
-
-connectBtn.onclick = () => {
-  tokenClient.requestAccessToken({ prompt: "" });
-};
-
-loadBtn.onclick = loadFolder;
-prevBtn.onclick = previousVideo;
-nextBtn.onclick = nextVideo;
-
-shuffleBtn.onclick = () => {
-  shuffle = !shuffle;
-  localStorage.setItem("shuffle", String(shuffle));
-  updateButtons();
-};
-
-repeatBtn.onclick = () => {
-  repeat = !repeat;
-  localStorage.setItem("repeat", String(repeat));
-  updateButtons();
-};
 
 player.addEventListener("ended", () => {
   if (repeat) {
