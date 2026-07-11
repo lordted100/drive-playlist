@@ -1,22 +1,29 @@
 const CLIENT_ID = "680156678883-s7f5c805ibivvonop8mblm4cine63trr.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
+const TOKEN_KEY = "driveAccessToken";
+const TOKEN_EXPIRY_KEY = "driveAccessTokenExpiry";
+
 let tokenClient;
 let accessToken = "";
 
-let videos = JSON.parse(localStorage.getItem("videos") || "[]");
+let videos = [];
+try {
+  videos = JSON.parse(localStorage.getItem("videos") || "[]");
+  if (!Array.isArray(videos)) videos = [];
+} catch {
+  videos = [];
+  localStorage.removeItem("videos");
+}
 let current = Number(localStorage.getItem("current") || 0);
 let shuffle = localStorage.getItem("shuffle") === "true";
 let repeat = localStorage.getItem("repeat") === "true";
 
-const cache = new Map();       // fileId -> { blob, url, ready }
-const loading = new Map();     // fileId -> AbortController
 let activeBlobUrl = "";
 
 const player = document.getElementById("player");
 const nowPlaying = document.getElementById("nowPlaying");
 const statusBox = document.getElementById("status");
-const bufferStatus = document.getElementById("bufferStatus");
 const playlistBox = document.getElementById("playlist");
 const folderInput = document.getElementById("folderInput");
 
@@ -29,41 +36,158 @@ const repeatBtn = document.getElementById("repeatBtn");
 
 folderInput.value = localStorage.getItem("folderLink") || "";
 
-window.onload = () => {
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPE,
-    callback: (response) => {
-      if (response.error) {
-        statusBox.textContent = "Google sign-in failed.";
-        return;
-      }
-      accessToken = response.access_token;
-      connectBtn.textContent = "Reconnect to Google Drive";
-      statusBox.textContent = "Connected. Load your folder.";
-    }
-  });
+document.addEventListener("DOMContentLoaded", () => {
+  connectBtn.onclick = connectGoogleDrive;
+  loadBtn.onclick = loadFolder;
+  prevBtn.onclick = previousVideo;
+  nextBtn.onclick = nextVideo;
+
+  shuffleBtn.onclick = () => {
+    shuffle = !shuffle;
+    localStorage.setItem("shuffle", String(shuffle));
+    updateButtons();
+  };
+
+  repeatBtn.onclick = () => {
+    repeat = !repeat;
+    localStorage.setItem("repeat", String(repeat));
+    updateButtons();
+  };
 
   updateButtons();
   render();
-};
+  initialiseGoogleSignIn();
+});
 
-connectBtn.onclick = () => tokenClient.requestAccessToken({ prompt: "consent" });
-loadBtn.onclick = loadFolder;
-prevBtn.onclick = previousVideo;
-nextBtn.onclick = nextVideo;
+async function initialiseGoogleSignIn() {
+  statusBox.textContent = "Starting Google Drive connection...";
 
-shuffleBtn.onclick = () => {
-  shuffle = !shuffle;
-  localStorage.setItem("shuffle", String(shuffle));
-  updateButtons();
-};
+  const googleReady = await waitForGoogleIdentity();
 
-repeatBtn.onclick = () => {
-  repeat = !repeat;
-  localStorage.setItem("repeat", String(repeat));
-  updateButtons();
-};
+  if (!googleReady) {
+    statusBox.textContent =
+      "Google sign-in failed to load. Refresh the page or disable content blocking for this site.";
+    return;
+  }
+
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: async (response) => {
+      if (response.error || !response.access_token) {
+        statusBox.textContent = "Google sign-in failed.";
+        return;
+      }
+
+      saveAccessToken(response);
+      connectBtn.textContent = "Google Drive connected";
+      statusBox.textContent = "Connected.";
+
+      if (folderInput.value.trim()) {
+        await loadFolder();
+      }
+    },
+    error_callback: () => {
+      statusBox.textContent =
+        "Automatic reconnect was blocked. Tap Connect to Google Drive once.";
+    }
+  });
+
+  if (restoreAccessToken()) {
+    connectBtn.textContent = "Google Drive connected";
+    statusBox.textContent = "Connection restored.";
+
+    if (folderInput.value.trim()) {
+      loadFolder();
+    }
+  } else {
+    trySilentReconnect();
+  }
+}
+
+function waitForGoogleIdentity(timeoutMs = 10000) {
+  return new Promise(resolve => {
+    const started = Date.now();
+
+    const check = () => {
+      if (
+        window.google &&
+        google.accounts &&
+        google.accounts.oauth2 &&
+        google.accounts.oauth2.initTokenClient
+      ) {
+        resolve(true);
+        return;
+      }
+
+      if (Date.now() - started >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+
+      setTimeout(check, 100);
+    };
+
+    check();
+  });
+}
+
+function connectGoogleDrive() {
+  if (!tokenClient) {
+    statusBox.textContent =
+      "Google sign-in is still loading. Wait a moment, then press Connect again.";
+    return;
+  }
+
+  tokenClient.requestAccessToken({ prompt: "" });
+}
+
+function saveAccessToken(response) {
+  accessToken = response.access_token;
+
+  const expiresInSeconds = Number(response.expires_in || 3600);
+  const expiryTime = Date.now() + (expiresInSeconds * 1000) - 60000;
+
+  localStorage.setItem(TOKEN_KEY, accessToken);
+  localStorage.setItem(TOKEN_EXPIRY_KEY, String(expiryTime));
+}
+
+function restoreAccessToken() {
+  const savedToken = localStorage.getItem(TOKEN_KEY) || "";
+  const expiryTime = Number(localStorage.getItem(TOKEN_EXPIRY_KEY) || 0);
+
+  if (savedToken && expiryTime > Date.now()) {
+    accessToken = savedToken;
+    return true;
+  }
+
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  return false;
+}
+
+function clearAccessToken() {
+  accessToken = "";
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXPIRY_KEY);
+}
+
+function trySilentReconnect() {
+  statusBox.textContent = "Trying to reconnect to Google Drive...";
+
+  setTimeout(() => {
+    try {
+      if (!tokenClient) {
+        statusBox.textContent = "Tap Connect to Google Drive.";
+        return;
+      }
+      tokenClient.requestAccessToken({ prompt: "" });
+    } catch (error) {
+      console.error(error);
+      statusBox.textContent = "Tap Connect to Google Drive.";
+    }
+  }, 500);
+}
 
 player.addEventListener("ended", () => {
   if (repeat) {
@@ -71,17 +195,6 @@ player.addEventListener("ended", () => {
     player.play();
   } else {
     nextVideo();
-  }
-});
-
-player.addEventListener("timeupdate", () => {
-  if (!videos[current]) return;
-  localStorage.setItem("lastVideoId", videos[current].id);
-  localStorage.setItem("lastTime", String(player.currentTime || 0));
-
-  // When the current video is over 20% played, make sure the next two are being prepared.
-  if (player.duration && player.currentTime / player.duration > 0.2) {
-    preloadUpcoming();
   }
 });
 
@@ -95,34 +208,74 @@ function getFolderId(input) {
   return match ? match[1] : input.trim();
 }
 
+async function authenticatedFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${accessToken}`);
+
+  const response = await fetch(url, {
+    ...options,
+    headers
+  });
+
+  if (response.status === 401) {
+    clearAccessToken();
+    connectBtn.textContent = "Connect to Google Drive";
+    statusBox.textContent = "Google connection expired. Tap Connect once.";
+  }
+
+  return response;
+}
+
 async function loadFolder() {
   const folderLink = folderInput.value.trim();
-  if (!folderLink) return alert("Paste your Google Drive folder link first.");
-  if (!accessToken) return alert("Tap Connect to Google Drive first.");
+
+  if (!folderLink) {
+    alert("Paste your Google Drive folder link first.");
+    return;
+  }
+
+  if (!accessToken) {
+    alert("Tap Connect to Google Drive first.");
+    return;
+  }
 
   localStorage.setItem("folderLink", folderLink);
   const folderId = getFolderId(folderLink);
 
   statusBox.textContent = "Loading video list...";
-  bufferStatus.textContent = "";
 
   try {
     const allFiles = [];
     let pageToken = "";
 
     do {
-      const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType contains 'video/'`);
-      const fields = encodeURIComponent("nextPageToken,files(id,name,mimeType,size,modifiedTime)");
-      let url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&orderBy=name&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-      if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+      const q = encodeURIComponent(
+        `'${folderId}' in parents and trashed=false and mimeType contains 'video/'`
+      );
 
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
+      const fields = encodeURIComponent(
+        "nextPageToken,files(id,name,mimeType,size,modifiedTime)"
+      );
 
-      if (!res.ok) throw new Error(await res.text());
+      let url =
+        `https://www.googleapis.com/drive/v3/files?q=${q}` +
+        `&fields=${fields}` +
+        `&orderBy=name` +
+        `&pageSize=1000` +
+        `&supportsAllDrives=true` +
+        `&includeItemsFromAllDrives=true`;
 
-      const data = await res.json();
+      if (pageToken) {
+        url += `&pageToken=${encodeURIComponent(pageToken)}`;
+      }
+
+      const response = await authenticatedFetch(url);
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const data = await response.json();
       allFiles.push(...(data.files || []));
       pageToken = data.nextPageToken || "";
     } while (pageToken);
@@ -144,227 +297,121 @@ async function loadFolder() {
       return;
     }
 
-    const lastId = localStorage.getItem("lastVideoId");
-    const lastIndex = videos.findIndex(v => v.id === lastId);
-    current = lastIndex >= 0 ? lastIndex : 0;
+    current = Math.min(current, videos.length - 1);
 
-    statusBox.textContent = `${videos.length} videos loaded. Preparing first video...`;
+    statusBox.textContent = `${videos.length} videos loaded.`;
     render();
+  } catch (error) {
+    console.error(error);
 
-    await playCurrent(true);
-  } catch (err) {
-    console.error(err);
-    statusBox.textContent = "Could not load folder. Check permissions and Drive API setup.";
+    if (accessToken) {
+      statusBox.textContent =
+        "Could not load folder. Check permissions and Drive API setup.";
+    }
   }
 }
 
-async function fetchVideoBlob(video, priority = false) {
-  if (cache.has(video.id)) return cache.get(video.id);
-  if (loading.has(video.id)) return loading.get(video.id).promise;
+async function fetchVideoBlob(video) {
+  const url =
+    `https://www.googleapis.com/drive/v3/files/` +
+    `${encodeURIComponent(video.id)}?alt=media`;
 
-  const controller = new AbortController();
-  const item = { controller, loaded: 0, total: video.size || 0 };
+  const response = await authenticatedFetch(url);
 
-  const promise = (async () => {
-    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(video.id)}?alt=media`;
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: controller.signal
-    });
+  const blob = await response.blob();
 
-    if (!res.ok) throw new Error(await res.text());
-
-    const total = Number(res.headers.get("content-length") || video.size || 0);
-    item.total = total;
-
-    const reader = res.body.getReader();
-    const chunks = [];
-    let loaded = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      chunks.push(value);
-      loaded += value.length;
-      item.loaded = loaded;
-
-      if (priority || isUpcoming(video.id)) {
-        updateBufferStatus();
-      }
-    }
-
-    const blob = new Blob(chunks, { type: video.mimeType || "video/mp4" });
-    const blobUrl = URL.createObjectURL(blob);
-    const cached = { blob, url: blobUrl, ready: true, size: blob.size };
-
-    cache.set(video.id, cached);
-    loading.delete(video.id);
-    updateBufferStatus();
-    trimCache();
-
-    return cached;
-  })();
-
-  item.promise = promise;
-  loading.set(video.id, item);
-
-  return promise;
+  return {
+    blob,
+    url: URL.createObjectURL(blob)
+  };
 }
 
-function isUpcoming(fileId) {
-  const upcoming = getUpcomingIndexes(2).map(i => videos[i]?.id);
-  return upcoming.includes(fileId);
-}
+async function playCurrent() {
+  if (!videos.length || !videos[current]) {
+    return;
+  }
 
-async function playCurrent(restoreTime = false) {
-  if (!videos.length || !videos[current]) return;
-  if (!accessToken) return alert("Reconnect to Google Drive first.");
+  if (!accessToken) {
+    alert("Reconnect to Google Drive first.");
+    return;
+  }
 
   const video = videos[current];
+
   nowPlaying.textContent = video.name;
   statusBox.textContent = "Buffering video...";
   localStorage.setItem("current", String(current));
   render();
 
   try {
-    const cached = await fetchVideoBlob(video, true);
+    const downloaded = await fetchVideoBlob(video);
 
-    if (activeBlobUrl && activeBlobUrl !== cached.url) {
-      // Do not revoke immediately if it is still cached.
+    if (activeBlobUrl) {
+      URL.revokeObjectURL(activeBlobUrl);
     }
 
-    player.src = cached.url;
-    player.load();
+    activeBlobUrl = downloaded.url;
 
-    player.onloadedmetadata = () => {
-      if (restoreTime && localStorage.getItem("lastVideoId") === video.id) {
-        const lastTime = Number(localStorage.getItem("lastTime") || 0);
-        if (lastTime > 5 && player.duration && lastTime < player.duration - 5) {
-          player.currentTime = lastTime;
-        }
-      }
-    };
+    player.pause();
+    player.src = activeBlobUrl;
+    player.load();
 
     await player.play().catch(() => {
       statusBox.textContent = "Ready. Tap play on the video player.";
     });
 
-    activeBlobUrl = cached.url;
-    statusBox.textContent = "Playing.";
-    preloadUpcoming();
-  } catch (err) {
-    console.error(err);
-    statusBox.textContent = "Video failed to buffer. Try reconnecting to Google Drive.";
-  }
-}
-
-function getUpcomingIndexes(count) {
-  if (!videos.length) return [];
-
-  const indexes = [];
-  let idx = current;
-
-  for (let n = 0; n < count; n++) {
-    if (shuffle && videos.length > 1) {
-      let next;
-      do {
-        next = Math.floor(Math.random() * videos.length);
-      } while (next === idx && videos.length > 1);
-      idx = next;
-    } else {
-      idx = (idx + 1) % videos.length;
+    if (!player.paused) {
+      statusBox.textContent = "Playing.";
     }
+  } catch (error) {
+    console.error(error);
 
-    if (!indexes.includes(idx) && idx !== current) indexes.push(idx);
-  }
-
-  return indexes;
-}
-
-function preloadUpcoming() {
-  if (!accessToken || !videos.length) return;
-
-  const upcoming = getUpcomingIndexes(2);
-  for (const index of upcoming) {
-    const video = videos[index];
-    if (video && !cache.has(video.id) && !loading.has(video.id)) {
-      fetchVideoBlob(video, false).catch(err => console.warn("Preload failed", err));
+    if (accessToken) {
+      statusBox.textContent =
+        "Video failed to buffer. Try reconnecting to Google Drive.";
     }
   }
-
-  updateBufferStatus();
 }
 
 function nextVideo() {
-  if (!videos.length) return;
+  if (!videos.length) {
+    return;
+  }
 
   if (shuffle && videos.length > 1) {
     let next;
+
     do {
       next = Math.floor(Math.random() * videos.length);
     } while (next === current);
+
     current = next;
   } else {
     current = (current + 1) % videos.length;
   }
 
-  localStorage.setItem("lastTime", "0");
-  playCurrent(false);
+  playCurrent();
 }
 
 function previousVideo() {
-  if (!videos.length) return;
+  if (!videos.length) {
+    return;
+  }
+
   current = (current - 1 + videos.length) % videos.length;
-  localStorage.setItem("lastTime", "0");
-  playCurrent(false);
-}
-
-function trimCache() {
-  // Keep current video + next two + previous one. Revoke older blobs to save phone storage/RAM.
-  const keep = new Set();
-  if (videos[current]) keep.add(videos[current].id);
-  for (const i of getUpcomingIndexes(2)) {
-    if (videos[i]) keep.add(videos[i].id);
-  }
-  const prevIndex = (current - 1 + videos.length) % videos.length;
-  if (videos[prevIndex]) keep.add(videos[prevIndex].id);
-
-  for (const [id, cached] of cache.entries()) {
-    if (!keep.has(id)) {
-      URL.revokeObjectURL(cached.url);
-      cache.delete(id);
-    }
-  }
-}
-
-function updateBufferStatus() {
-  const upcoming = getUpcomingIndexes(2);
-  const parts = [];
-
-  for (const index of upcoming) {
-    const video = videos[index];
-    if (!video) continue;
-
-    if (cache.has(video.id)) {
-      parts.push(`Ready: ${video.name}`);
-    } else if (loading.has(video.id)) {
-      const item = loading.get(video.id);
-      const pct = item.total ? Math.round((item.loaded / item.total) * 100) : 0;
-      parts.push(`Preloading ${pct}%: ${video.name}`);
-    }
-  }
-
-  bufferStatus.textContent = parts.join(" | ");
-  render();
+  playCurrent();
 }
 
 function render() {
   playlistBox.innerHTML = "";
 
   if (!videos.length) {
-    playlistBox.innerHTML = '<div class="track">No playlist loaded yet.</div>';
+    playlistBox.innerHTML =
+      '<div class="track">No playlist loaded yet.</div>';
     return;
   }
 
@@ -372,24 +419,14 @@ function render() {
     const row = document.createElement("div");
     row.className = "track" + (index === current ? " active" : "");
 
-    let state = "";
-    if (cache.has(video.id)) state = "Ready";
-    else if (loading.has(video.id)) {
-      const item = loading.get(video.id);
-      const pct = item.total ? Math.round((item.loaded / item.total) * 100) : 0;
-      state = `Preloading ${pct}%`;
-    }
-
     row.innerHTML = `
       <strong>${escapeHtml(video.name)}</strong><br>
-      <small>${index + 1} of ${videos.length}${state ? " · " + state : ""}</small>
-      ${state && state.startsWith("Preloading") ? `<div class="progress"><div class="bar" style="width:${state.match(/\d+/)?.[0] || 0}%"></div></div>` : ""}
+      <small>${index + 1} of ${videos.length}</small>
     `;
 
     row.onclick = () => {
       current = index;
-      localStorage.setItem("lastTime", "0");
-      playCurrent(false);
+      playCurrent();
     };
 
     playlistBox.appendChild(row);
@@ -401,3 +438,9 @@ function escapeHtml(text) {
   div.textContent = text;
   return div.innerHTML;
 }
+
+window.addEventListener("beforeunload", () => {
+  if (activeBlobUrl) {
+    URL.revokeObjectURL(activeBlobUrl);
+  }
+});
