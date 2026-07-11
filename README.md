@@ -1,15 +1,18 @@
-# Drive Playlist — Auto Reconnect Only, Button Fix
+# Drive Playlist - Blob Preload Build
 
-This is the same requested build, with one technical correction:
+Upload these three files to your GitHub repository root:
 
-- Google Identity Services is now allowed to finish loading before OAuth is initialized.
-- Button handlers are attached immediately after the page loads.
-- Corrupt/stale local playlist storage can no longer stop the JavaScript.
-- No resume-position feature.
-- No next-two-video preloading.
-- Existing ordinary shuffle and repeat remain unchanged.
-
-Replace:
 - index.html
 - style.css
 - script.js
+
+This version:
+- uses Google OAuth to list your Drive folder
+- fetches videos as temporary browser blobs
+- preloads the next two videos while the current one plays
+- automatically starts the next video from the preloaded blob
+- does not save videos to your Downloads folder
+
+Note:
+The first video may take a few seconds to buffer.
+After that, transitions should be much smoother because upcoming videos are already being prepared.
