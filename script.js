@@ -4,6 +4,11 @@ const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const TOKEN_KEY = "drivePlaylistAccessToken";
 const TOKEN_EXPIRY_KEY = "drivePlaylistAccessTokenExpiry";
 
+const VIDEO_DB_NAME = "drivePlaylistVideoCache";
+const VIDEO_DB_VERSION = 1;
+const VIDEO_STORE_NAME = "currentVideo";
+const VIDEO_CACHE_KEY = "current";
+
 let tokenClient;
 let accessToken = "";
 
@@ -32,7 +37,7 @@ const repeatBtn = document.getElementById("repeatBtn");
 
 folderInput.value = localStorage.getItem("folderLink") || "";
 
-window.onload = () => {
+window.onload = async () => {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPE,
@@ -77,6 +82,10 @@ window.onload = () => {
 
   updateButtons();
   render();
+
+  // Restore only the current video from persistent browser storage.
+  // This does not restore or retain the preloaded upcoming videos.
+  await restoreCurrentVideoFromStorage();
 };
 
 connectBtn.onclick = () => tokenClient.requestAccessToken({ prompt: "" });
@@ -232,6 +241,15 @@ async function fetchVideoBlob(video, priority = false) {
 
     cache.set(video.id, cached);
     loading.delete(video.id);
+
+    // Persist only the video that is actually current when its download finishes.
+    // Upcoming preloaded videos remain memory-only and disappear on refresh.
+    if (videos[current]?.id === video.id) {
+      saveCurrentVideoToStorage(video, blob).catch(error => {
+        console.warn("Could not save the current video for refresh restore:", error);
+      });
+    }
+
     updateBufferStatus();
     trimCache();
 
@@ -251,9 +269,13 @@ function isUpcoming(fileId) {
 
 async function playCurrent(restoreTime = false) {
   if (!videos.length || !videos[current]) return;
-  if (!accessToken) return alert("Reconnect to Google Drive first.");
 
   const video = videos[current];
+
+  // A restored current video can play without another Drive download.
+  if (!accessToken && !cache.has(video.id)) {
+    return alert("Reconnect to Google Drive first.");
+  }
   nowPlaying.textContent = video.name;
   statusBox.textContent = "Buffering video...";
   localStorage.setItem("current", String(current));
@@ -425,6 +447,147 @@ function render() {
 
     playlistBox.appendChild(row);
   });
+}
+
+function openVideoDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB is not supported by this browser."));
+      return;
+    }
+
+    const request = indexedDB.open(VIDEO_DB_NAME, VIDEO_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (!db.objectStoreNames.contains(VIDEO_STORE_NAME)) {
+        db.createObjectStore(VIDEO_STORE_NAME);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveCurrentVideoToStorage(video, blob) {
+  const db = await openVideoDatabase();
+
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIDEO_STORE_NAME, "readwrite");
+      const store = transaction.objectStore(VIDEO_STORE_NAME);
+
+      store.put(
+        {
+          id: video.id,
+          name: video.name,
+          mimeType: video.mimeType || blob.type || "video/mp4",
+          size: blob.size,
+          blob,
+          savedAt: Date.now()
+        },
+        VIDEO_CACHE_KEY
+      );
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function getStoredCurrentVideo() {
+  const db = await openVideoDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIDEO_STORE_NAME, "readonly");
+      const store = transaction.objectStore(VIDEO_STORE_NAME);
+      const request = store.get(VIDEO_CACHE_KEY);
+
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function restoreCurrentVideoFromStorage() {
+  try {
+    const stored = await getStoredCurrentVideo();
+
+    if (!stored || !stored.blob || !stored.id) {
+      return;
+    }
+
+    let restoredIndex = videos.findIndex(video => video.id === stored.id);
+
+    // The saved playlist should normally already contain this item.
+    // This fallback keeps the cached file playable if local playlist data was cleared.
+    if (restoredIndex < 0) {
+      videos.push({
+        id: stored.id,
+        name: stored.name || "Cached video",
+        mimeType: stored.mimeType || stored.blob.type || "video/mp4",
+        size: Number(stored.size || stored.blob.size || 0)
+      });
+
+      restoredIndex = videos.length - 1;
+      localStorage.setItem("videos", JSON.stringify(videos));
+    }
+
+    current = restoredIndex;
+    localStorage.setItem("current", String(current));
+
+    const blobUrl = URL.createObjectURL(stored.blob);
+    const cached = {
+      blob: stored.blob,
+      url: blobUrl,
+      ready: true,
+      size: stored.blob.size
+    };
+
+    cache.set(stored.id, cached);
+    activeBlobUrl = blobUrl;
+
+    nowPlaying.textContent =
+      videos[current]?.name || stored.name || "Cached video";
+
+    player.src = blobUrl;
+    player.load();
+
+    player.onloadedmetadata = () => {
+      if (localStorage.getItem("lastVideoId") === stored.id) {
+        const lastTime = Number(localStorage.getItem("lastTime") || 0);
+
+        if (
+          lastTime > 5 &&
+          player.duration &&
+          lastTime < player.duration - 5
+        ) {
+          player.currentTime = lastTime;
+        }
+      }
+    };
+
+    await player.play().then(() => {
+      statusBox.textContent = accessToken
+        ? "Cached current video restored. Google Drive connection restored."
+        : "Cached current video restored. Google Drive is reconnecting.";
+    }).catch(() => {
+      statusBox.textContent =
+        "Cached current video restored. Tap play to continue.";
+    });
+
+    render();
+  } catch (error) {
+    console.warn("Could not restore the cached current video:", error);
+  }
 }
 
 function escapeHtml(text) {
