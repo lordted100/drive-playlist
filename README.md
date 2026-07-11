@@ -1,18 +1,10 @@
-# Drive Playlist - Blob Preload Build
+Upload index.html, style.css and script.js to the root of the GitHub repository.
 
-Upload these three files to your GitHub repository root:
+Features:
+- Dual-player gapless switching
+- True shuffle: no repeats until every other video has played
+- Remembers the shuffle queue
+- Reuses a valid Google token and tries automatic reconnection
+- Automatically reloads the saved folder
 
-- index.html
-- style.css
-- script.js
-
-This version:
-- uses Google OAuth to list your Drive folder
-- fetches videos as temporary browser blobs
-- preloads the next two videos while the current one plays
-- automatically starts the next video from the preloaded blob
-- does not save videos to your Downloads folder
-
-Note:
-The first video may take a few seconds to buffer.
-After that, transitions should be much smoother because upcoming videos are already being prepared.
+Google access tokens expire, so Google may occasionally require one tap on Connect. Permanent refresh-token access would require a secure backend rather than a static GitHub Pages site.
