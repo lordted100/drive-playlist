@@ -9,17 +9,14 @@
 </head>
 <body>
 <main class="app">
-  <header><h1>Drive Playlist</h1><p>Gapless playback, true shuffle and automatic reconnect.</p></header>
+  <header><h1>Drive Playlist</h1><p>True shuffle and automatic Google reconnect.</p></header>
   <section class="card">
-    <div class="player-stage">
-      <video id="playerA" class="video-player active-player" controls playsinline preload="auto"></video>
-      <video id="playerB" class="video-player standby-player" controls playsinline preload="auto"></video>
-    </div>
+    <video id="player" controls playsinline preload="auto"></video>
     <h2 id="nowPlaying">Nothing loaded yet</h2>
-    <p id="status">Starting…</p><p id="bufferStatus"></p>
+    <p id="status">Starting…</p>
+    <p id="bufferStatus"></p>
     <div class="grid"><button id="prevBtn">⏮ Previous</button><button id="nextBtn">Next ⏭</button></div>
-    <div class="grid"><button id="shuffleBtn">True shuffle: Off</button><button id="gaplessBtn">Gapless: On</button></div>
-    <button id="repeatBtn">Repeat current: Off</button>
+    <div class="grid"><button id="shuffleBtn">True shuffle: Off</button><button id="repeatBtn">Repeat current: Off</button></div>
   </section>
   <section class="card">
     <button id="connectBtn" class="primary">Connect to Google Drive</button>
