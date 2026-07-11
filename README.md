@@ -1,18 +1,18 @@
-# Drive Playlist - Blob Preload Build
+# Drive Playlist v1.1
 
-Upload these three files to your GitHub repository root:
+Base: the exact uploaded working `drive-playlist-blob-preload(1).zip`.
 
+Only Google connection behaviour was changed:
+
+- Reuses the existing access token until it expires.
+- Attempts a silent reconnect when the token is no longer valid.
+- The Connect button reuses the existing Google session where possible.
+
+No playback, playlist, shuffle, repeat, resume-position, or preload code was changed.
+
+Replace these files in GitHub:
 - index.html
 - style.css
 - script.js
 
-This version:
-- uses Google OAuth to list your Drive folder
-- fetches videos as temporary browser blobs
-- preloads the next two videos while the current one plays
-- automatically starts the next video from the preloaded blob
-- does not save videos to your Downloads folder
-
-Note:
-The first video may take a few seconds to buffer.
-After that, transitions should be much smoother because upcoming videos are already being prepared.
+Google can still require one Connect tap after the access token expires or if Chrome blocks silent authorization.

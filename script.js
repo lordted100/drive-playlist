@@ -1,6 +1,9 @@
 const CLIENT_ID = "680156678883-s7f5c805ibivvonop8mblm4cine63trr.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
+const TOKEN_KEY = "drivePlaylistAccessToken";
+const TOKEN_EXPIRY_KEY = "drivePlaylistAccessTokenExpiry";
+
 let tokenClient;
 let accessToken = "";
 
@@ -34,21 +37,49 @@ window.onload = () => {
     client_id: CLIENT_ID,
     scope: SCOPE,
     callback: (response) => {
-      if (response.error) {
+      if (response.error || !response.access_token) {
         statusBox.textContent = "Google sign-in failed.";
         return;
       }
+
       accessToken = response.access_token;
+
+      const expiresInSeconds = Number(response.expires_in || 3600);
+      const expiryTime = Date.now() + (expiresInSeconds * 1000) - 60000;
+
+      localStorage.setItem(TOKEN_KEY, accessToken);
+      localStorage.setItem(TOKEN_EXPIRY_KEY, String(expiryTime));
+
       connectBtn.textContent = "Reconnect to Google Drive";
       statusBox.textContent = "Connected. Load your folder.";
     }
   });
 
+  const savedToken = localStorage.getItem(TOKEN_KEY) || "";
+  const savedExpiry = Number(localStorage.getItem(TOKEN_EXPIRY_KEY) || 0);
+
+  if (savedToken && savedExpiry > Date.now()) {
+    accessToken = savedToken;
+    connectBtn.textContent = "Reconnect to Google Drive";
+    statusBox.textContent = "Google Drive connection restored.";
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
+
+    setTimeout(() => {
+      try {
+        tokenClient.requestAccessToken({ prompt: "" });
+      } catch (error) {
+        console.log("Silent reconnect was unavailable:", error);
+      }
+    }, 500);
+  }
+
   updateButtons();
   render();
 };
 
-connectBtn.onclick = () => tokenClient.requestAccessToken({ prompt: "consent" });
+connectBtn.onclick = () => tokenClient.requestAccessToken({ prompt: "" });
 loadBtn.onclick = loadFolder;
 prevBtn.onclick = previousVideo;
 nextBtn.onclick = nextVideo;
