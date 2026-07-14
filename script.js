@@ -8,6 +8,7 @@ const VIDEO_DB_NAME = "drivePlaylistVideoCache";
 const VIDEO_DB_VERSION = 1;
 const VIDEO_STORE_NAME = "currentVideo";
 const VIDEO_CACHE_KEY = "current";
+const SAVED_PLAYLISTS_KEY = "drivePlaylistSavedLinks";
 
 let tokenClient;
 let accessToken = "";
@@ -27,6 +28,9 @@ const statusBox = document.getElementById("status");
 const bufferStatus = document.getElementById("bufferStatus");
 const playlistBox = document.getElementById("playlist");
 const folderInput = document.getElementById("folderInput");
+const playlistSelect = document.getElementById("playlistSelect");
+const savePlaylistBtn = document.getElementById("savePlaylistBtn");
+const deletePlaylistBtn = document.getElementById("deletePlaylistBtn");
 
 const connectBtn = document.getElementById("connectBtn");
 const loadBtn = document.getElementById("loadBtn");
@@ -82,6 +86,7 @@ window.onload = async () => {
 
   updateButtons();
   render();
+  renderSavedPlaylists();
 
   // Restore only the current video from persistent browser storage.
   // This does not restore or retain the preloaded upcoming videos.
@@ -92,6 +97,21 @@ connectBtn.onclick = () => tokenClient.requestAccessToken({ prompt: "" });
 loadBtn.onclick = loadFolder;
 prevBtn.onclick = previousVideo;
 nextBtn.onclick = nextVideo;
+
+savePlaylistBtn.onclick = saveCurrentPlaylistLink;
+deletePlaylistBtn.onclick = deleteSelectedPlaylist;
+
+playlistSelect.onchange = () => {
+  const savedPlaylists = getSavedPlaylists();
+  const selected = savedPlaylists.find(
+    playlist => playlist.id === playlistSelect.value
+  );
+
+  if (selected) {
+    folderInput.value = selected.link;
+    localStorage.setItem("folderLink", selected.link);
+  }
+};
 
 shuffleBtn.onclick = () => {
   shuffle = !shuffle;
@@ -128,6 +148,76 @@ player.addEventListener("timeupdate", () => {
 function updateButtons() {
   shuffleBtn.textContent = `Shuffle: ${shuffle ? "On" : "Off"}`;
   repeatBtn.textContent = `Repeat: ${repeat ? "On" : "Off"}`;
+}
+
+function getSavedPlaylists() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVED_PLAYLISTS_KEY) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    localStorage.removeItem(SAVED_PLAYLISTS_KEY);
+    return [];
+  }
+}
+
+function setSavedPlaylists(playlists) {
+  localStorage.setItem(SAVED_PLAYLISTS_KEY, JSON.stringify(playlists));
+}
+
+function renderSavedPlaylists(selectedId = "") {
+  const savedPlaylists = getSavedPlaylists();
+  playlistSelect.innerHTML = '<option value="">Select a saved playlist</option>';
+  for (const playlist of savedPlaylists) {
+    const option = document.createElement("option");
+    option.value = playlist.id;
+    option.textContent = playlist.name;
+    playlistSelect.appendChild(option);
+  }
+  if (selectedId) playlistSelect.value = selectedId;
+}
+
+function saveCurrentPlaylistLink() {
+  const link = folderInput.value.trim();
+  if (!link) {
+    alert("Paste a Google Drive folder link first.");
+    return;
+  }
+  const name = prompt("Enter a name for this playlist:", `Playlist ${getSavedPlaylists().length + 1}`);
+  if (!name || !name.trim()) return;
+  const savedPlaylists = getSavedPlaylists();
+  const existingIndex = savedPlaylists.findIndex(p => p.name.toLowerCase() === name.trim().toLowerCase());
+  let savedId;
+  if (existingIndex >= 0) {
+    if (!confirm(`A playlist named "${name.trim()}" already exists. Replace its link?`)) return;
+    savedId = savedPlaylists[existingIndex].id;
+    savedPlaylists[existingIndex] = { id: savedId, name: name.trim(), link };
+  } else {
+    savedId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    savedPlaylists.push({ id: savedId, name: name.trim(), link });
+  }
+  savedPlaylists.sort((a,b) => a.name.localeCompare(b.name, undefined, {sensitivity:"base"}));
+  setSavedPlaylists(savedPlaylists);
+  localStorage.setItem("folderLink", link);
+  renderSavedPlaylists(savedId);
+  statusBox.textContent = `Saved playlist: ${name.trim()}`;
+}
+
+function deleteSelectedPlaylist() {
+  const selectedId = playlistSelect.value;
+  if (!selectedId) {
+    alert("Select a saved playlist first.");
+    return;
+  }
+  const savedPlaylists = getSavedPlaylists();
+  const selected = savedPlaylists.find(p => p.id === selectedId);
+  if (!selected) {
+    renderSavedPlaylists();
+    return;
+  }
+  if (!confirm(`Delete the saved playlist "${selected.name}"?`)) return;
+  setSavedPlaylists(savedPlaylists.filter(p => p.id !== selectedId));
+  renderSavedPlaylists();
+  statusBox.textContent = `Deleted saved playlist: ${selected.name}`;
 }
 
 function getFolderId(input) {

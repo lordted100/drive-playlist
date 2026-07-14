@@ -97,3 +97,16 @@ button {
   width: 0%;
   background: white;
 }
+
+
+select {
+  width: 100%;
+  padding: 13px;
+  margin-top: 10px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: 1px solid #3a3a4a;
+  background: #20202b;
+  color: #f4f4f6;
+}
+.saved-playlists { margin-top: 6px; }
